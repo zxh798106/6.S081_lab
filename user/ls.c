@@ -79,7 +79,10 @@ main(int argc, char *argv[])
     ls(".");
     exit(0);
   }
-  for(i=1; i<argc; i++)
-    ls(argv[i]);
+  for(i=1; i<argc; i++) {
+  	//printf("argv : %s\n", argv[i]);
+  	ls(argv[i]);
+  }
+    
   exit(0);
 }

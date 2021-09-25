@@ -149,7 +149,11 @@ UPROGS=\
 	$U/_grind\
 	$U/_wc\
 	$U/_zombie\
-
+	$U/_sleep\
+	$U/_pingpong\
+	$U/_primes\
+	$U/_find\
+	$U/_xargs\
 
 ifeq ($(LAB),syscall)
 UPROGS += \
@@ -277,6 +281,7 @@ tarball: handin-check
 tarball-pref: handin-check
 	@SUF=$(LAB); \
 	git archive --format=tar HEAD > lab-$$SUF-handin.tar; \
+	git archive --format=tar HEAD > lab-$$SUF-handin.tar; \
 	git diff $(UPSTREAM)/$(LAB) > /tmp/lab-$$SUF-diff.patch; \
 	tar -rf lab-$$SUF-handin.tar /tmp/lab-$$SUF-diff.patch; \
 	gzip -c lab-$$SUF-handin.tar > lab-$$SUF-handin.tar.gz; \
@@ -302,4 +307,3 @@ myapi.key:
 	fi;
 
 
-.PHONY: handin tarball tarball-pref clean grade handin-check
