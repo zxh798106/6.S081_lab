@@ -86,6 +86,7 @@ int get_free_memory(void) {
 	struct run *r;
 	acquire(&kmem.lock);
 	r = kmem.freelist;
+	// 便利空闲链表，计算空的页数
 	while (r) {
 		++page_num;
 		r = r->next;

@@ -113,13 +113,13 @@ sys_sysinfo(void) {
 	uint64 addr;
 	struct sysinfo info;
 	struct proc *p = myproc();
-	
+	// 将用户空间的info地址存储至addr中
 	if (argaddr(0, &addr) < 0)
 		return -1;
-	
+	// 统计free_mem和nproc
 	info.freemem = get_free_memory();
 	info.nproc = get_unused_proc();
-	
+	// 将填充好的info返回到用户空间中
 	if(copyout(p->pagetable, addr, (char *)&info, sizeof(info)) < 0)
       return -1;
     return 0;

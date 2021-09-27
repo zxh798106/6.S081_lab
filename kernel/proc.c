@@ -701,7 +701,7 @@ procdump(void)
 int get_unused_proc(void) {
 	struct proc *p;
 	int unused_num = 0;
-	
+	// 遍历进程数组
 	for (p = proc; p < &proc[NPROC]; p++) {
 		//acquire(&p->lock);
     	if (p->state != UNUSED) {
