@@ -80,3 +80,17 @@ kalloc(void)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
 }
+
+int get_free_memory(void) {
+	int page_num = 0;
+	struct run *r;
+	acquire(&kmem.lock);
+	r = kmem.freelist;
+	while (r) {
+		++page_num;
+		r = r->next;
+	}
+	release(&kmem.lock);
+	
+	return page_num * 4096;
+}

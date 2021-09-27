@@ -115,7 +115,7 @@ void testproc() {
   wait(&status);
   sinfo(&info);
   if(info.nproc != nproc) {
-      printf("sysinfotest: FAIL nproc is %d instead of %d\n", info.nproc, nproc);
+      printf("sysinfotest: parent FAIL nproc is %d instead of %d\n", info.nproc, nproc);
       exit(1);
   }
 }
