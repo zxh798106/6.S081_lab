@@ -168,11 +168,14 @@ void            uvminit(pagetable_t, uchar *, uint);
 uint64          uvmalloc(pagetable_t, uint64, uint64);
 uint64          uvmdealloc(pagetable_t, uint64, uint64);
 void 			vmprint(pagetable_t);
+pagetable_t		kvminit_lab();
+void			kvmmap_lab(pagetable_t, uint64, uint64, uint64, int);
 #ifdef SOL_COW
 #else
 int             uvmcopy(pagetable_t, pagetable_t, uint64);
 #endif
 void            uvmfree(pagetable_t, uint64);
+void 			freewalk(pagetable_t);
 void            uvmunmap(pagetable_t, uint64, uint64, int);
 void            uvmclear(pagetable_t, uint64);
 uint64          walkaddr(pagetable_t, uint64);

@@ -18,7 +18,9 @@ struct spinlock pid_lock;
 extern void forkret(void);
 static void wakeup1(struct proc *chan);
 static void freeproc(struct proc *p);
+static void proc_free_k_pagetable(pagetable_t k_pagetable);
 
+extern char etext[];  // kernel.ld sets this to end of kernel code.
 extern char trampoline[]; // trampoline.S
 
 // initialize the proc table at boot time.
@@ -34,14 +36,14 @@ procinit(void)
       // Allocate a page for the process's kernel stack.
       // Map it high in memory, followed by an invalid
       // guard page.
-      char *pa = kalloc();
+      /*char *pa = kalloc();
       if(pa == 0)
         panic("kalloc");
       uint64 va = KSTACK((int) (p - proc));
       kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
-      p->kstack = va;
+      p->kstack = va;*/
   }
-  kvminithart();
+  //kvminithart();
 }
 
 // Must be called with interrupts disabled,
@@ -112,7 +114,17 @@ found:
     release(&p->lock);
     return 0;
   }
-
+  
+  // 创建内核页表并初始化
+  p->k_pagetable = kvminit_lab();
+  // k_pagetable建立内核栈的映射
+  char *pa = kalloc();
+  if(pa == 0)
+    panic("kalloc");
+  uint64 va = KSTACK((int) (0));
+  kvmmap_lab(p->k_pagetable, va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+  p->kstack = va;
+  
   // An empty user page table.
   p->pagetable = proc_pagetable(p);
   if(p->pagetable == 0){
@@ -139,6 +151,11 @@ freeproc(struct proc *p)
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
+  // 释放内核页表，不但释放其叶子PTE对应的物理内存
+  if (p->k_pagetable) 
+  	proc_free_k_pagetable(p->k_pagetable);
+  p->k_pagetable = 0;  
+  
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
   p->pagetable = 0;
@@ -194,6 +211,27 @@ proc_freepagetable(pagetable_t pagetable, uint64 sz)
   uvmunmap(pagetable, TRAPFRAME, 1, 0);
   uvmfree(pagetable, sz);
 }
+
+// 解除进程内核页表IO，内核栈映射。释放内核栈物理内存。释放进程内核页表。
+static void
+proc_free_k_pagetable(pagetable_t pagetable)
+{
+  // 解除IO设备映射，但不释放对应的物理内存
+  uvmunmap(pagetable, UART0, 1, 0);
+  uvmunmap(pagetable, VIRTIO0, 1, 0);
+  uvmunmap(pagetable, CLINT, 0x10000 / PGSIZE, 0);
+  uvmunmap(pagetable, PLIC, 0x400000 / PGSIZE, 0);
+  uvmunmap(pagetable, KERNBASE, PGROUNDUP(((uint64)etext-KERNBASE)) / PGSIZE, 0);
+  uvmunmap(pagetable, (uint64)etext, PGROUNDUP((PHYSTOP-(uint64)etext)) / PGSIZE, 0);
+  uvmunmap(pagetable, TRAMPOLINE, 1, 0);
+  
+  // 解除内核栈映射，并释放其对应的物理内存
+  uvmunmap(pagetable, myproc()->kstack, 1, 1);
+  
+  // 释放页表
+  freewalk(pagetable);
+}
+
 
 // a user program that calls exec("/init")
 // od -t xC initcode
@@ -473,8 +511,15 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+        
+        // lab：切换内核页表
+        w_satp(MAKE_SATP(p->k_pagetable));
+ 	    sfence_vma();
+        
         swtch(&c->context, &p->context);
-
+        
+		kvminithart(); // lab : scheduler() should use kernel_pagetable when no process is running. 
+		
         // Process is done running for now.
         // It should have changed its p->state before coming back.
         c->proc = 0;

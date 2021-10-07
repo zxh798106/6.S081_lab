@@ -5,6 +5,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "proc.h"
 
 /*
  * the kernel's page table.
@@ -14,6 +16,45 @@ pagetable_t kernel_pagetable;
 extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
+
+// 创建一个内核页表，建立IO映射，并返回页表
+pagetable_t kvminit_lab() {
+  pagetable_t k_pagetable = (pagetable_t) kalloc();
+  memset(k_pagetable, 0, PGSIZE);
+
+  // uart registers
+  kvmmap_lab(k_pagetable, UART0, UART0, PGSIZE, PTE_R | PTE_W);
+
+  // virtio mmio disk interface
+  kvmmap_lab(k_pagetable, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
+
+  // CLINT
+  kvmmap_lab(k_pagetable, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
+
+  // PLIC
+  kvmmap_lab(k_pagetable, PLIC, PLIC, 0x400000, PTE_R | PTE_W);
+
+  // map kernel text executable and read-only.
+  kvmmap_lab(k_pagetable, KERNBASE, KERNBASE, (uint64)etext-KERNBASE, PTE_R | PTE_X);
+
+  // map kernel data and the physical RAM we'll make use of.
+  kvmmap_lab(k_pagetable, (uint64)etext, (uint64)etext, PHYSTOP-(uint64)etext, PTE_R | PTE_W);
+
+  // map the trampoline for trap entry/exit to
+  // the highest virtual address in the kernel.
+  kvmmap_lab(k_pagetable, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
+  
+  return k_pagetable;
+}
+
+// 输入：页表
+// 功能：建立va pa映射
+void
+kvmmap_lab(pagetable_t k_pagetable, uint64 va, uint64 pa, uint64 sz, int perm)
+{
+  if(mappages(k_pagetable, va, sz, pa, perm) != 0)
+    panic("kvmmap_lab");
+}
 
 /*
  * create a direct-map page table for the kernel.
@@ -131,8 +172,14 @@ kvmpa(uint64 va)
   uint64 off = va % PGSIZE;
   pte_t *pte;
   uint64 pa;
-  
-  pte = walk(kernel_pagetable, va, 0);
+ 
+  // lab:如果有进程，使用该进程的内核页表 
+  struct proc *p = myproc();
+  if (p)
+  	pte = walk(p->k_pagetable, va, 0);
+  else
+  	pte = walk(kernel_pagetable, va, 0);
+  	
   if(pte == 0)
     panic("kvmpa");
   if((*pte & PTE_V) == 0)
