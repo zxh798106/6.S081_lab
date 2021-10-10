@@ -78,5 +78,8 @@ kalloc(void)
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
+    
+  if (r == 0) 
+  	printf("kalloc no free page\n");
   return (void*)r;
 }

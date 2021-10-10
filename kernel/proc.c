@@ -17,8 +17,7 @@ struct spinlock pid_lock;
 
 extern void forkret(void);
 static void wakeup1(struct proc *chan);
-static void freeproc(struct proc *p);
-static void proc_free_k_pagetable(pagetable_t k_pagetable);
+//static void freeproc(struct proc *p);
 
 extern char etext[];  // kernel.ld sets this to end of kernel code.
 extern char trampoline[]; // trampoline.S
@@ -43,7 +42,7 @@ procinit(void)
       kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
       p->kstack = va;*/
   }
-  //kvminithart();
+  kvminithart();
 }
 
 // Must be called with interrupts disabled,
@@ -115,15 +114,23 @@ found:
     return 0;
   }
   
-  // 创建内核页表并初始化
+  // lab:创建内核页表并初始化
   p->k_pagetable = kvminit_lab();
-  // k_pagetable建立内核栈的映射
+  // lab:k_pagetable建立内核栈的映射
   char *pa = kalloc();
   if(pa == 0)
     panic("kalloc");
   uint64 va = KSTACK((int) (0));
   kvmmap_lab(p->k_pagetable, va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
   p->kstack = va;
+  /*// lab:建立内核页表TRAPFRAME映射
+  if(mappages(p->k_pagetable, TRAPFRAME, PGSIZE,
+              (uint64)(p->trapframe), PTE_R | PTE_W) < 0){
+    printf("kernel TRAPFRAME wrong\n");
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }*/
   
   // An empty user page table.
   p->pagetable = proc_pagetable(p);
@@ -145,7 +152,8 @@ found:
 // free a proc structure and the data hanging from it,
 // including user pages.
 // p->lock must be held.
-static void
+//static void
+void
 freeproc(struct proc *p)
 {
   if(p->trapframe)
@@ -153,7 +161,7 @@ freeproc(struct proc *p)
   p->trapframe = 0;
   // 释放内核页表，不但释放其叶子PTE对应的物理内存
   if (p->k_pagetable) 
-  	proc_free_k_pagetable(p->k_pagetable);
+  	proc_free_k_pagetable(p->k_pagetable, p->sz);
   p->k_pagetable = 0;  
   
   if(p->pagetable)
@@ -212,24 +220,32 @@ proc_freepagetable(pagetable_t pagetable, uint64 sz)
   uvmfree(pagetable, sz);
 }
 
-// 解除进程内核页表IO，内核栈映射。释放内核栈物理内存。释放进程内核页表。
-static void
-proc_free_k_pagetable(pagetable_t pagetable)
+// lab:解除进程内核页表IO，内核栈映射。释放内核栈物理内存。释放进程内核页表。
+void proc_free_k_pagetable(pagetable_t pagetable, uint64 sz)
 {
+  //printf("free_k start, sz: %d\n",sz);
   // 解除IO设备映射，但不释放对应的物理内存
   uvmunmap(pagetable, UART0, 1, 0);
   uvmunmap(pagetable, VIRTIO0, 1, 0);
-  uvmunmap(pagetable, CLINT, 0x10000 / PGSIZE, 0);
+  //uvmunmap(pagetable, CLINT, 0x10000 / PGSIZE, 0);
   uvmunmap(pagetable, PLIC, 0x400000 / PGSIZE, 0);
   uvmunmap(pagetable, KERNBASE, PGROUNDUP(((uint64)etext-KERNBASE)) / PGSIZE, 0);
   uvmunmap(pagetable, (uint64)etext, PGROUNDUP((PHYSTOP-(uint64)etext)) / PGSIZE, 0);
   uvmunmap(pagetable, TRAMPOLINE, 1, 0);
   
+  //uvmunmap(pagetable, TRAPFRAME, 1, 0);
+  
   // 解除内核栈映射，并释放其对应的物理内存
   uvmunmap(pagetable, myproc()->kstack, 1, 1);
   
   // 释放页表
-  freewalk(pagetable);
+  //freewalk(pagetable);
+  
+  // 解除内核页表用户空间映射并释放内核页表，但不用释放用户空间的内存
+  uvmfree2(pagetable, sz);
+  
+  //if (PRINTF_SWTCH) 
+  //printf("free_k finish\n");
 }
 
 
@@ -257,6 +273,8 @@ userinit(void)
   // allocate one user page and copy init's instructions
   // and data into it.
   uvminit(p->pagetable, initcode, sizeof(initcode));
+  //uvminit(p, initcode, sizeof(initcode)); // lab:
+  pagetable_copy(p->pagetable, p->k_pagetable, 0, PGSIZE); // lab:将用户页表拷贝至内核页表
   p->sz = PGSIZE;
 
   // prepare for the very first "return" from kernel to user.
@@ -267,6 +285,7 @@ userinit(void)
   p->cwd = namei("/");
 
   p->state = RUNNABLE;
+
 
   release(&p->lock);
 }
@@ -296,6 +315,7 @@ growproc(int n)
 int
 fork(void)
 {
+  if (PRINTF_SWTCH) printf("fork can reach\n");
   int i, pid;
   struct proc *np;
   struct proc *p = myproc();
@@ -304,13 +324,18 @@ fork(void)
   if((np = allocproc()) == 0){
     return -1;
   }
-
+  
   // Copy user memory from parent to child.
   if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
     freeproc(np);
     release(&np->lock);
     return -1;
   }
+  
+  pagetable_copy(np->pagetable, np->k_pagetable, 0, p->sz); // lab:将子进程用户页表拷贝至内核页表
+  
+  
+  
   np->sz = p->sz;
 
   np->parent = p;
@@ -516,7 +541,7 @@ scheduler(void)
         w_satp(MAKE_SATP(p->k_pagetable));
  	    sfence_vma();
         
-        swtch(&c->context, &p->context);
+        swtch(&c->context, &p->context);	
         
 		kvminithart(); // lab : scheduler() should use kernel_pagetable when no process is running. 
 		
@@ -525,7 +550,7 @@ scheduler(void)
         c->proc = 0;
 
         found = 1;
-      }
+      }																																	
       release(&p->lock);
     }
 #if !defined (LAB_FS)

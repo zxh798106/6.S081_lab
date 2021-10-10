@@ -29,7 +29,7 @@ pagetable_t kvminit_lab() {
   kvmmap_lab(k_pagetable, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
 
   // CLINT
-  kvmmap_lab(k_pagetable, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
+  //kvmmap_lab(k_pagetable, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
 
   // PLIC
   kvmmap_lab(k_pagetable, PLIC, PLIC, 0x400000, PTE_R | PTE_W);
@@ -229,8 +229,10 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
     if((pte = walk(pagetable, a, 0)) == 0)
       panic("uvmunmap: walk");
-    if((*pte & PTE_V) == 0)
-      panic("uvmunmap: not mapped");
+    if((*pte & PTE_V) == 0) {
+        printf("uvmunmap, va : %p\n", a);
+    	panic("uvmunmap: not mapped");
+    }
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
     if(do_free){
@@ -254,6 +256,22 @@ uvmcreate()
   return pagetable;
 }
 
+
+// lab:修改了原先uvminit的输入参数，为了方便访问k_pagetable。
+/*void uvminit(struct proc *p, uchar *src, uint sz) {
+  char *mem;
+  
+  if(sz >= PGSIZE)
+    panic("inituvm: more than a page");
+  mem = kalloc();
+  memset(mem, 0, PGSIZE);
+  
+  //mappages(p->k_pagetable, 0, PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_X); // lab:建立内核页表va pa映射
+  mappages(p->pagetable, 0, PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_X|PTE_U);
+  
+  memmove(mem, src, sz);
+}*/
+
 // Load the user initcode into address 0 of pagetable,
 // for the very first process.
 // sz must be less than a page.
@@ -261,12 +279,15 @@ void
 uvminit(pagetable_t pagetable, uchar *src, uint sz)
 {
   char *mem;
-
+  
   if(sz >= PGSIZE)
     panic("inituvm: more than a page");
   mem = kalloc();
   memset(mem, 0, PGSIZE);
+  
+  //mappages(p->k_pagetable, 0, PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_X|PTE_U); // lab:建立内核页表va pa映射
   mappages(pagetable, 0, PGSIZE, (uint64)mem, PTE_W|PTE_R|PTE_X|PTE_U);
+  
   memmove(mem, src, sz);
 }
 
@@ -277,7 +298,15 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 {
   char *mem;
   uint64 a;
-
+  //struct proc *p = myproc();
+  
+  /*// lab:用户空间不能超出USER_MAXVA
+  if (newsz >= USER_MAXVA) {
+  	printf("va is higher than USER_MAXVA\n");
+  	return 0;
+  }*/
+  	
+  
   if(newsz < oldsz)
     return oldsz;
 
@@ -289,11 +318,22 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
       return 0;
     }
     memset(mem, 0, PGSIZE);
+    
+    if (PRINTF_SWTCH) printf("uvmalloc reach0, va: %p\n", a);
+    /*// lab:建立内核页表va pa映射
+    if(mappages(p->k_pagetable, a, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R) != 0){
+      kfree(mem);
+      uvmdealloc(pagetable, a, oldsz);
+      return 0;
+    }*/
+    if (PRINTF_SWTCH) printf("uvmalloc reach1\n");
     if(mappages(pagetable, a, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
       kfree(mem);
       uvmdealloc(pagetable, a, oldsz);
       return 0;
     }
+    if (PRINTF_SWTCH) printf("uvmalloc reach2\n");
+    
   }
   return newsz;
 }
@@ -305,11 +345,14 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 uint64
 uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 {
+  //struct proc *p = myproc();
+
   if(newsz >= oldsz)
     return oldsz;
 
   if(PGROUNDUP(newsz) < PGROUNDUP(oldsz)){
     int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
+    //uvmunmap(p->k_pagetable, PGROUNDUP(newsz), npages, 0); // lab:解除内核页表pa va映射，但不释放对应pa。
     uvmunmap(pagetable, PGROUNDUP(newsz), npages, 1);
   }
 
@@ -343,6 +386,13 @@ uvmfree(pagetable_t pagetable, uint64 sz)
 {
   if(sz > 0)
     uvmunmap(pagetable, 0, PGROUNDUP(sz)/PGSIZE, 1);
+  freewalk(pagetable);
+}
+
+// 解除va pa映射，释放页表，但不释放pa
+void uvmfree2(pagetable_t pagetable, uint64 sz) {
+  if(sz > 0)
+    uvmunmap(pagetable, 0, PGROUNDUP(sz)/PGSIZE, 0);
   freewalk(pagetable);
 }
 
@@ -388,10 +438,17 @@ void
 uvmclear(pagetable_t pagetable, uint64 va)
 {
   pte_t *pte;
+  struct proc *p = myproc();
   
   pte = walk(pagetable, va, 0);
   if(pte == 0)
     panic("uvmclear");
+  *pte &= ~PTE_U;
+  
+  // lab:对内核页表做相同操作
+  pte = walk(p->k_pagetable, va, 0);
+  if(pte == 0)
+    panic("uvmclear_k");
   *pte &= ~PTE_U;
 }
 
@@ -426,6 +483,8 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 int
 copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
+  return copyin_new(pagetable, dst, srcva, len);
+  
   uint64 n, va0, pa0;
 
   while(len > 0){
@@ -452,6 +511,8 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 int
 copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 {
+  return copyinstr_new(pagetable, dst, srcva, max);
+
   uint64 n, va0, pa0;
   int got_null = 0;
 
@@ -508,11 +569,21 @@ void recur_print(pagetable_t pagetable, int level) {
 			recur_print((pagetable_t)child, level + 1);
 		}
 	}
-	
-	
 }
 
 void vmprint(pagetable_t pagetable) {
 	recur_print(pagetable, 0);
 }
+
+// 将进程用户页表拷贝至进程内核页表
+void pagetable_copy(pagetable_t pagetable, pagetable_t k_pagetable, uint64 va_start, uint64 va_end) {
+	pte_t *pte, *k_pte;
+	
+	for (uint64 a = va_start; a < va_end; a += PGSIZE) {
+		pte = walk(pagetable, a, 0);
+		k_pte = walk(k_pagetable, a, 1);
+		*k_pte = (*pte) & ~PTE_U; // 用户不能访问，所以要与上 ~PTE_U
+	}
+}
+
 

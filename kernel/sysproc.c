@@ -43,12 +43,34 @@ sys_sbrk(void)
 {
   int addr;
   int n;
+  struct proc *p = myproc();
 
   if(argint(0, &n) < 0)
     return -1;
   addr = myproc()->sz;
+  
+  // lab:防止用户地址超出，和内核IO最低地址PLIC重叠
+  if (addr + n >= USER_MAXVA) {
+  	printf("va is higher than USER_MAXVA\n");
+  	return -1;
+  }
+  
   if(growproc(n) < 0)
     return -1;
+  
+  // lab:将改变的用户页表拷贝至内核页表
+  // lab:增加内存新增部分的页表以及建立映射
+  if (n > 0) {
+  	pagetable_copy(p->pagetable, p->k_pagetable, addr, p->sz);
+  }
+  // lab:内存缩减，要解除缩减部分的映射
+  else if (n < 0) {
+    int oldsz = addr;
+    int newsz = p->sz;
+  	int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
+    uvmunmap(p->k_pagetable, PGROUNDUP(newsz), npages, 0); // lab:解除内核页表pa va映射，但不释放对应pa。
+  }
+  
   return addr;
 }
 

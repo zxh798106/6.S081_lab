@@ -13,6 +13,12 @@ struct mbuf;
 struct sock;
 #endif
 
+#define PRINTF_SWTCH 0
+
+// vmcopyin.c
+int				copyin_new(pagetable_t, char *, uint64, uint64);
+int				copyinstr_new(pagetable_t, char *, uint64, uint64);
+
 // bio.c
 void            binit(void);
 struct buf*     bread(uint, uint);
@@ -90,8 +96,10 @@ int             cpuid(void);
 void            exit(int);
 int             fork(void);
 int             growproc(int);
+void 			freeproc(struct proc *);
 pagetable_t     proc_pagetable(struct proc *);
 void            proc_freepagetable(pagetable_t, uint64);
+void 			proc_free_k_pagetable(pagetable_t, uint64);
 int             kill(int);
 struct cpu*     mycpu(void);
 struct cpu*     getmycpu(void);
@@ -170,11 +178,13 @@ uint64          uvmdealloc(pagetable_t, uint64, uint64);
 void 			vmprint(pagetable_t);
 pagetable_t		kvminit_lab();
 void			kvmmap_lab(pagetable_t, uint64, uint64, uint64, int);
+void 			pagetable_copy(pagetable_t, pagetable_t, uint64, uint64);
 #ifdef SOL_COW
 #else
 int             uvmcopy(pagetable_t, pagetable_t, uint64);
 #endif
 void            uvmfree(pagetable_t, uint64);
+void            uvmfree2(pagetable_t, uint64);
 void 			freewalk(pagetable_t);
 void            uvmunmap(pagetable_t, uint64, uint64, int);
 void            uvmclear(pagetable_t, uint64);

@@ -30,6 +30,9 @@
 #define CLINT_MTIMECMP(hartid) (CLINT + 0x4000 + 8*(hartid))
 #define CLINT_MTIME (CLINT + 0xBFF8) // cycles since boot.
 
+// lab:定义最大用户地址
+#define USER_MAXVA 0x0c000000L
+
 // qemu puts programmable interrupt controller here.
 #define PLIC 0x0c000000L
 #define PLIC_PRIORITY (PLIC + 0x0)
