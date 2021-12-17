@@ -121,6 +121,9 @@ panic(char *s)
   printf("panic: ");
   printf(s);
   printf("\n");
+  
+  backtrace();
+  
   panicked = 1; // freeze uart output from other CPUs
   for(;;)
     ;
@@ -131,4 +134,21 @@ printfinit(void)
 {
   initlock(&pr.lock, "pr");
   pr.locking = 1;
+}
+
+void backtrace() {
+	uint64 fp = r_fp(); // 获取当前frame_pointer
+	uint64 fp_top = PGROUNDUP(fp);
+	uint64 fp_down = PGROUNDDOWN(fp);
+	uint64 ra;
+	printf("backtrace:\n");
+	
+	while (1) {
+		if (fp >= fp_top || fp < fp_down) // 判断是否超出fp所在页的范围
+			break;
+		//printf("c_fp is %p\n", fp);
+		ra = *(uint64*)(fp - 8); // (fp - 8) 是ra的地址，要解地址读其值才是ra
+		printf("%p\n", ra);
+		fp = *(uint64*)(fp - 16);
+	}
 }
