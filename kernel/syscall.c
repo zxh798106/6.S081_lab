@@ -105,6 +105,17 @@ extern uint64 sys_wait(void);
 extern uint64 sys_write(void);
 extern uint64 sys_uptime(void);
 
+uint64 sys_sigalarm(void) {
+	struct proc *p = myproc();
+	argint(0, &p->alarm_interval);
+	argaddr(1, &p->handler_addr);
+	return 0;
+}
+
+uint64 sys_sigreturn(void) {
+	return 0;
+}
+
 static uint64 (*syscalls[])(void) = {
 [SYS_fork]    sys_fork,
 [SYS_exit]    sys_exit,
@@ -127,6 +138,8 @@ static uint64 (*syscalls[])(void) = {
 [SYS_link]    sys_link,
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
+[SYS_sigalarm]	sys_sigalarm,
+[SYS_sigreturn]	sys_sigreturn,
 };
 
 void

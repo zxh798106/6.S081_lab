@@ -77,9 +77,19 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
-    yield();
-
+  if(which_dev == 2) {
+  	// 判断是否触发alarm
+  	if (p->alarm_interval > 0 || p->handler_addr > 0) {
+  		++p->alarm_interval_cnt;
+  		if (p->alarm_interval_cnt == p->alarm_interval) {
+  			p->trapframe->epc = p->handler_addr; // 修改epc使其指向periodic函数地址，返回用户空间后直接执行该函数。
+  			p->alarm_interval_cnt = 0;
+  		}
+  	}
+  
+  	yield();
+  }
+    
   usertrapret();
 }
 
