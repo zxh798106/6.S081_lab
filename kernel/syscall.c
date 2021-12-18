@@ -107,12 +107,48 @@ extern uint64 sys_uptime(void);
 
 uint64 sys_sigalarm(void) {
 	struct proc *p = myproc();
-	argint(0, &p->alarm_interval);
-	argaddr(1, &p->handler_addr);
+	argint(0, &p->alarm_interval); // 获取ticks
+	argaddr(1, &p->handler_addr); // 获取periodic函数地址
 	return 0;
 }
 
 uint64 sys_sigreturn(void) {
+	struct proc *p = myproc();
+	// 恢复寄存器内容
+	p->trapframe->epc = p->alarmframe.epc;
+	p->trapframe->ra = p->alarmframe.ra;
+	p->trapframe->sp = p->alarmframe.sp;
+	p->trapframe->gp = p->alarmframe.gp;
+	p->trapframe->tp = p->alarmframe.tp;
+	p->trapframe->t0 = p->alarmframe.t0;
+	p->trapframe->t1 = p->alarmframe.t1;
+	p->trapframe->t2 = p->alarmframe.t2;
+	p->trapframe->s0 = p->alarmframe.s0;
+	p->trapframe->s1 = p->alarmframe.s1;
+	p->trapframe->a0 = p->alarmframe.a0;
+	p->trapframe->a1 = p->alarmframe.a1;
+	p->trapframe->a2 = p->alarmframe.a2;
+	p->trapframe->a3 = p->alarmframe.a3;
+	p->trapframe->a4 = p->alarmframe.a4;
+	p->trapframe->a5 = p->alarmframe.a5;
+	p->trapframe->a6 = p->alarmframe.a6;
+	p->trapframe->a7 = p->alarmframe.a7;
+	p->trapframe->s2 = p->alarmframe.s2;
+	p->trapframe->s3 = p->alarmframe.s3;
+	p->trapframe->s4 = p->alarmframe.s4;
+	p->trapframe->s5 = p->alarmframe.s5;
+	p->trapframe->s6 = p->alarmframe.s6;
+	p->trapframe->s7 = p->alarmframe.s7;
+	p->trapframe->s8 = p->alarmframe.s8;
+	p->trapframe->s9 = p->alarmframe.s9;
+	p->trapframe->s10 = p->alarmframe.s10;
+	p->trapframe->s11 = p->alarmframe.s11;
+	p->trapframe->t3 = p->alarmframe.t3;
+	p->trapframe->t4 = p->alarmframe.t4;
+	p->trapframe->t5 = p->alarmframe.t5;
+	p->trapframe->t6 = p->alarmframe.t6;
+	
+	p->alarm_interval_cnt = 0; // alarm执行完成后，置0，可再次触发。
 	return 0;
 }
 
