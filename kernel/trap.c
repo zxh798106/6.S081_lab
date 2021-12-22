@@ -67,7 +67,42 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  }
+  // lazy allocation，对要使用的页进行内存分配 
+  else if (r_scause() == 15 || r_scause() == 13) {  	
+  	uint64 va = r_stval(); // 读取发生缺页中断的虚拟地址
+  	//printf("page fault %p\n", va);
+  	//if (va == 0x3ffc4000) 
+  	//	vmprint(p->pagetable);
+  	// 缺页中断的va比进程现有的最高虚拟地址要高，杀死该进程
+  	if (va >= p->sz) {
+  		p->killed = 1;
+  	}
+  	else {
+  		uint64 sp_down = PGROUNDDOWN(p->trapframe->sp);
+  		uint64 va_down = PGROUNDUP(va);
+  		// 只允许分配栈上方堆的内存空间。
+  		if (sp_down < va_down) {
+  			uint64 ka = (uint64) kalloc();
+				if (ka == 0) {
+					p->killed = 1;
+				}
+				else {
+					va = PGROUNDDOWN(va);
+					if(mappages(p->pagetable, va, PGSIZE, ka, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
+						printf("usertrap: map wrong\n");
+				  	kfree((void *)ka);
+				  	p->killed = 1;
+					}
+				}
+  		}
+  		else {
+  			printf("sp = %p, va = %p\n", p->trapframe->sp, va);
+  			p->killed = 1;
+  		}
+  	}
+  }
+  else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
@@ -137,6 +172,7 @@ kerneltrap()
   uint64 sepc = r_sepc();
   uint64 sstatus = r_sstatus();
   uint64 scause = r_scause();
+  //struct proc *p = myproc();
   
   if((sstatus & SSTATUS_SPP) == 0)
     panic("kerneltrap: not from supervisor mode");

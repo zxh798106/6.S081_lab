@@ -43,12 +43,32 @@ sys_sbrk(void)
 {
   int addr;
   int n;
+  struct proc *p = myproc();
 
   if(argint(0, &n) < 0)
     return -1;
   addr = myproc()->sz;
-  if(growproc(n) < 0)
-    return -1;
+  
+  uint64 sp = p->trapframe->sp;
+  uint64 sp_base = PGROUNDUP(sp); // 获取用户栈的最高地址
+  
+  // 超出最高地址
+  if (p->sz + n >= MAXVA) {
+  	return addr;
+  }
+  else if (n >= 0)
+  	p->sz += n; 
+  // 若n负数，使得缩减后的空间低于栈的基地址，则返回错误。
+  else if (n < 0 && p->sz - sp_base < -n) {
+  	printf("sbrk n negtive than sp_base, p->sz = %p, sp_base = %p, diff = %d, n = %d\n", p->sz, sp_base, p->sz - sp_base, n);
+  	return -1;
+  }
+  // n<0 立即释放内存
+  else if (growproc(n) < 0) 
+  	return -1;
+  
+  //if(growproc(n) < 0)
+  //  return -1;
   return addr;
 }
 
