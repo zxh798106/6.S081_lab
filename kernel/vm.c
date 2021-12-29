@@ -19,6 +19,7 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 extern char trampoline[]; // trampoline.S
 
 extern int page_ref[]; // kalloc.c
+extern struct spinlock page_ref_lock; //kalloc.c
 
 /*
  * create a direct-map page table for the kernel.
@@ -167,7 +168,9 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
     //printf("mappages: pa %p\n");
     if (pa >= KERNBASE) {
     	int idx = (uint64)((uint64)pa - KERNBASE) / PGSIZE;
+    	acquire(&page_ref_lock);
     	++page_ref[idx]; // 增加页引用计数
+    	release(&page_ref_lock);
     	//printf("mappages: page_ref[%d] = %d, pa = %p\n", idx, page_ref[idx], pa);
     }
     if(a == last)
@@ -200,15 +203,17 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     uint64 pa = PTE2PA(*pte);
     if (pa >= KERNBASE) {
     	int idx = (uint64)(pa - KERNBASE) / PGSIZE;
+    	acquire(&page_ref_lock);
     	--page_ref[idx]; // 引用计数减1
+    	release(&page_ref_lock);
 		  //printf("uvmunmap: page_ref[%d] = %d\n", idx, page_ref[idx]);
     }
     if(do_free){  
     	// 计数为1时才释放物理内存
-    	if (page_ref[(uint64)(pa - KERNBASE) / PGSIZE] == 1) 
+    	//if (page_ref[(uint64)(pa - KERNBASE) / PGSIZE] == 1) 
     		kfree((void*)pa);
-     	/*else if (pa < KERNBASE)
-     		kfree((void*)pa);*/
+     	//else if (pa < KERNBASE)
+     	//	kfree((void*)pa);
     }
     *pte = 0;
   }
@@ -391,7 +396,7 @@ int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
   uint64 n, va0, pa0;
-  //struct proc *p = myproc();
+  struct proc *p = myproc();
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
@@ -402,6 +407,8 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
         
     pte_t *pte;
     if ((pte = walk(pagetable, va0, 0)) == 0) {
+    	panic("copyout : pte not exist");
+    	p->killed = 1;
     	return -1;
     }
 		// 若是COW页
@@ -413,17 +420,21 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 			else {
 				uint64 ka = (uint64) kalloc();
 				if (ka == 0) {
-					//p->killed = 1;
+					p->killed = 1;
 					return -1;
 				}
 				else {
+					acquire(&page_ref_lock);
 					--page_ref[(uint64)(pa0 - KERNBASE) / PGSIZE];
+					release(&page_ref_lock);
 					memmove((char*)ka, (char*)pa0, PGSIZE); // 将旧物理地址内容拷贝到新物理地址
-					*pte = (*pte | PTE_W) & ~PTE_COW;
+					//*pte = (*pte | PTE_W) & ~PTE_COW;
 					uint flags = PTE_FLAGS(*pte);
-					*pte = PA2PTE(ka) | flags;
-					//*pte = (PA2PTE(ka) | flags | PTE_W) & ~PTE_COW;
+					//*pte = PA2PTE(ka) | flags;
+					*pte = (PA2PTE(ka) | flags | PTE_W) & ~PTE_COW;
+					acquire(&page_ref_lock);
 					++page_ref[(uint64)(ka - KERNBASE) / PGSIZE];
+					release(&page_ref_lock);
 					
 					pa0 = ka;
 				}

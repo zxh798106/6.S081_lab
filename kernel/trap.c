@@ -17,6 +17,7 @@ void kernelvec();
 extern int devintr();
 
 extern int page_ref[]; // kalloc.c
+extern struct spinlock page_ref_lock; //kalloc.c
 
 void
 trapinit(void)
@@ -73,50 +74,39 @@ usertrap(void)
   else if (r_scause() == 15 || r_scause() == 13) {
   	uint64 va = r_stval(); // 读取发生缺页中断的虚拟地址
   	//printf("user page fault %p\n", va);
-  	// 缺页中断的va比进程现有的最高虚拟地址要高，杀死该进程
-  	if (va >= p->sz) {
-  		p->killed = 1;
-  	} 
-  	else {
+
+		pte_t *pte;
+		if ((pte = walk(p->pagetable, va, 0)) == 0 || !(*pte & PTE_COW)) {
+			p->killed = 1;
+		}
+		else {
 			va = PGROUNDDOWN(va);
-			pte_t *pte;
-			uint64 pa;
-			if ((pte = walk(p->pagetable, va, 0)) == 0) {
-				panic("trap: pte should exist");
-				//p->killed = 1;
-				//return;
-			}
-				
-			if ((*pte & PTE_V) == 0)
-				panic("trap: page not present");
-			pa = PTE2PA(*pte);
-			// 若是COW页
-			if ((*pte & PTE_COW)) {
-				// 检查引用计数，若为2，取消PTE_COW并设置可写
-				if (page_ref[(uint64)((uint64)pa - KERNBASE) / PGSIZE] == 2) {
-					*pte = (*pte | PTE_W) & ~PTE_COW;
-				}
-				else {
-					uint64 ka = (uint64) kalloc();
-					if (ka == 0) {
-						p->killed = 1;
-					}
-					else {
-						--page_ref[(uint64)(pa - KERNBASE) / PGSIZE];
-						memmove((char*)ka, (char*)pa, PGSIZE); // 将旧物理地址内容拷贝到新物理地址
-						*pte = (*pte | PTE_W) & ~PTE_COW;
-						uint flags = PTE_FLAGS(*pte);
-						*pte = PA2PTE(ka) | flags;
-						//*pte = (PA2PTE(ka) | flags | PTE_W) & ~PTE_COW;
-						++page_ref[(uint64)(ka - KERNBASE) / PGSIZE];
-					}
-				}
+			uint64 pa = PTE2PA(*pte);
+			// 检查引用计数，若为2，取消PTE_COW并设置可写
+			if (page_ref[(uint64)((uint64)pa - KERNBASE) / PGSIZE] == 2) {
+				*pte = (*pte | PTE_W) & ~PTE_COW;
 			}
 			else {
-				printf("usertrap: page is not COW\n");
-				p->killed = 1;
+				uint64 ka = (uint64) kalloc();
+				if (ka == 0) {
+					p->killed = 1;
+					//return;
+				}
+				else {
+					acquire(&page_ref_lock);
+					--page_ref[(uint64)(pa - KERNBASE) / PGSIZE];
+					release(&page_ref_lock);
+					memmove((char*)ka, (char*)pa, PGSIZE); // 将旧物理地址内容拷贝到新物理地址
+					//*pte = (*pte | PTE_W) & ~PTE_COW;
+					uint flags = PTE_FLAGS(*pte);
+					//*pte = PA2PTE(ka) | flags;
+					*pte = (PA2PTE(ka) | flags | PTE_W) & ~PTE_COW;
+					acquire(&page_ref_lock);
+					++page_ref[(uint64)(ka - KERNBASE) / PGSIZE];
+					release(&page_ref_lock);
+				}
 			}
-  	}
+		}
   }
   else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);

@@ -15,6 +15,7 @@ extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
                    
 int page_ref[PAGE_NUM] = {0};
+struct spinlock page_ref_lock;
 
 struct run {
   struct run *next;
@@ -29,6 +30,7 @@ void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
+  initlock(&page_ref_lock, "page_ref");
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -64,7 +66,12 @@ kfree(void *pa)
 		else if (page_ref[(uint64)((uint64)pa - KERNBASE) / PGSIZE] < 0)
 			panic("kfree: page_ref < 0");
 	}*/
-
+	
+	// 计数为1时才释放物理内存
+	if ((uint64)pa >= KERNBASE && page_ref[(uint64)(pa - KERNBASE) / PGSIZE] > 1) 
+		return;
+		
+	
   struct run *r;
 
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
