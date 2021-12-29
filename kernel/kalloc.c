@@ -13,6 +13,8 @@ void freerange(void *pa_start, void *pa_end);
 
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
+                   
+int page_ref[PAGE_NUM] = {0};
 
 struct run {
   struct run *next;
@@ -34,9 +36,16 @@ void
 freerange(void *pa_start, void *pa_end)
 {
   char *p;
+  int num = 0;
+  int test = 0;
   p = (char*)PGROUNDUP((uint64)pa_start);
-  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
-    kfree(p);
+  printf("pa_start : %p\n", (uint64)pa_start);
+  for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE) {
+  	kfree(p);
+  	++num;
+  	test += page_ref[(uint64)(p - KERNBASE) / PGSIZE];
+  }
+  printf("page num : %d, test : %d\n", num, test);
 }
 
 // Free the page of physical memory pointed at by v,
@@ -46,6 +55,16 @@ freerange(void *pa_start, void *pa_end)
 void
 kfree(void *pa)
 {
+	/*if ((uint64)pa >= KERNBASE) {
+		int idx = (uint64)((uint64)pa - KERNBASE) / PGSIZE;
+		if (page_ref[idx] > 1) {
+			//printf("kfree: page_ref[%d] = %d\n", idx, page_ref[idx]);
+			return;
+		}
+		else if (page_ref[(uint64)((uint64)pa - KERNBASE) / PGSIZE] < 0)
+			panic("kfree: page_ref < 0");
+	}*/
+
   struct run *r;
 
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)

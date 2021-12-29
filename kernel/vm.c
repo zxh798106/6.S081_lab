@@ -5,6 +5,9 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "proc.h"
+
 
 /*
  * the kernel's page table.
@@ -14,6 +17,8 @@ pagetable_t kernel_pagetable;
 extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
+
+extern int page_ref[]; // kalloc.c
 
 /*
  * create a direct-map page table for the kernel.
@@ -159,6 +164,12 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
     if(*pte & PTE_V)
       panic("remap");
     *pte = PA2PTE(pa) | perm | PTE_V;
+    //printf("mappages: pa %p\n");
+    if (pa >= KERNBASE) {
+    	int idx = (uint64)((uint64)pa - KERNBASE) / PGSIZE;
+    	++page_ref[idx]; // 增加页引用计数
+    	//printf("mappages: page_ref[%d] = %d, pa = %p\n", idx, page_ref[idx], pa);
+    }
     if(a == last)
       break;
     a += PGSIZE;
@@ -186,9 +197,18 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
       panic("uvmunmap: not mapped");
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
-    if(do_free){
-      uint64 pa = PTE2PA(*pte);
-      kfree((void*)pa);
+    uint64 pa = PTE2PA(*pte);
+    if (pa >= KERNBASE) {
+    	int idx = (uint64)(pa - KERNBASE) / PGSIZE;
+    	--page_ref[idx]; // 引用计数减1
+		  //printf("uvmunmap: page_ref[%d] = %d\n", idx, page_ref[idx]);
+    }
+    if(do_free){  
+    	// 计数为1时才释放物理内存
+    	if (page_ref[(uint64)(pa - KERNBASE) / PGSIZE] == 1) 
+    		kfree((void*)pa);
+     	/*else if (pa < KERNBASE)
+     		kfree((void*)pa);*/
     }
     *pte = 0;
   }
@@ -311,9 +331,25 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
+  //char *mem;
+	
+	for(i = 0; i < sz; i += PGSIZE){
+    if((pte = walk(old, i, 0)) == 0)
+      panic("uvmcopy: pte should exist");
+    if((*pte & PTE_V) == 0)
+      panic("uvmcopy: page not present");
+    pa = PTE2PA(*pte);
+    *pte = (*pte | PTE_COW) & ~PTE_W;
+    flags = PTE_FLAGS(*pte);
+    if(mappages(new, i, PGSIZE, pa, flags) != 0){
+      //kfree(mem);
+      panic("cow uvmcopy: mappages wrong");
+      goto err;
+    }
+  }
+  return 0;
 
-  for(i = 0; i < sz; i += PGSIZE){
+  /*for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
@@ -328,7 +364,7 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       goto err;
     }
   }
-  return 0;
+  return 0;*/
 
  err:
   uvmunmap(new, 0, i / PGSIZE, 1);
@@ -355,12 +391,49 @@ int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
   uint64 n, va0, pa0;
+  //struct proc *p = myproc();
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
     pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
-      return -1;
+    if(pa0 == 0) {
+    	return -1;
+    }
+        
+    pte_t *pte;
+    if ((pte = walk(pagetable, va0, 0)) == 0) {
+    	return -1;
+    }
+		// 若是COW页
+		if ((*pte & PTE_COW)) {
+			// 检查引用计数，若为2，取消PTE_COW并设置可写
+			if (page_ref[(uint64)((uint64)pa0 - KERNBASE) / PGSIZE] == 2) {
+				*pte = (*pte | PTE_W) & ~PTE_COW;
+			}
+			else {
+				uint64 ka = (uint64) kalloc();
+				if (ka == 0) {
+					//p->killed = 1;
+					return -1;
+				}
+				else {
+					--page_ref[(uint64)(pa0 - KERNBASE) / PGSIZE];
+					memmove((char*)ka, (char*)pa0, PGSIZE); // 将旧物理地址内容拷贝到新物理地址
+					*pte = (*pte | PTE_W) & ~PTE_COW;
+					uint flags = PTE_FLAGS(*pte);
+					*pte = PA2PTE(ka) | flags;
+					//*pte = (PA2PTE(ka) | flags | PTE_W) & ~PTE_COW;
+					++page_ref[(uint64)(ka - KERNBASE) / PGSIZE];
+					
+					pa0 = ka;
+				}
+			}
+		}
+		else {
+			//printf("usertrap: page is not COW\n");
+		}
+    
+      
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
@@ -386,6 +459,7 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;
+    
     n = PGSIZE - (srcva - va0);
     if(n > len)
       n = len;
