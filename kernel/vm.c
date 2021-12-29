@@ -421,7 +421,7 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 				uint64 ka = (uint64) kalloc();
 				if (ka == 0) {
 					p->killed = 1;
-					return -1;
+					return -1; // 这里killed赋值后要返回，不然会执行到下面的语句。
 				}
 				else {
 					acquire(&page_ref_lock);

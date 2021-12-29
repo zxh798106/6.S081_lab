@@ -76,6 +76,7 @@ usertrap(void)
   	//printf("user page fault %p\n", va);
 
 		pte_t *pte;
+		// 检查该页是否是COW页
 		if ((pte = walk(p->pagetable, va, 0)) == 0 || !(*pte & PTE_COW)) {
 			p->killed = 1;
 		}
@@ -90,19 +91,19 @@ usertrap(void)
 				uint64 ka = (uint64) kalloc();
 				if (ka == 0) {
 					p->killed = 1;
-					//return;
+					//return; // 不能加返回，因为killed标志的判定在该函数的后面。
 				}
 				else {
 					acquire(&page_ref_lock);
-					--page_ref[(uint64)(pa - KERNBASE) / PGSIZE];
+					--page_ref[(uint64)(pa - KERNBASE) / PGSIZE]; // 原地址计数-1
 					release(&page_ref_lock);
 					memmove((char*)ka, (char*)pa, PGSIZE); // 将旧物理地址内容拷贝到新物理地址
 					//*pte = (*pte | PTE_W) & ~PTE_COW;
 					uint flags = PTE_FLAGS(*pte);
 					//*pte = PA2PTE(ka) | flags;
-					*pte = (PA2PTE(ka) | flags | PTE_W) & ~PTE_COW;
+					*pte = (PA2PTE(ka) | flags | PTE_W) & ~PTE_COW; // 将原pte标志位拷贝过来，并设置可读，清除COW标志。
 					acquire(&page_ref_lock);
-					++page_ref[(uint64)(ka - KERNBASE) / PGSIZE];
+					++page_ref[(uint64)(ka - KERNBASE) / PGSIZE]; // 新地址计数 +1
 					release(&page_ref_lock);
 				}
 			}
