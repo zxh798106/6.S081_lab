@@ -11,14 +11,33 @@
 #define MAX_THREAD  4
 
 
+struct context {
+  uint64 ra;
+  uint64 sp;
+
+  // callee-saved
+  uint64 s0;
+  uint64 s1;
+  uint64 s2;
+  uint64 s3;
+  uint64 s4;
+  uint64 s5;
+  uint64 s6;
+  uint64 s7;
+  uint64 s8;
+  uint64 s9;
+  uint64 s10;
+  uint64 s11;
+};
+
 struct thread {
   char       stack[STACK_SIZE]; /* the thread's stack */
   int        state;             /* FREE, RUNNING, RUNNABLE */
-
+	struct context context;
 };
 struct thread all_thread[MAX_THREAD];
 struct thread *current_thread;
-extern void thread_switch(uint64, uint64);
+extern void thread_switch(struct context *,struct context *);
               
 void 
 thread_init(void)
@@ -39,10 +58,11 @@ thread_schedule(void)
 
   /* Find another runnable thread. */
   next_thread = 0;
-  t = current_thread + 1;
+  t = current_thread + 1; // 这句代码作用是什么？ 作用是从当前进程的下一个进程开始检查状态。指向结构体的指针+1，地址增加的值为结构体的大小。
   for(int i = 0; i < MAX_THREAD; i++){
     if(t >= all_thread + MAX_THREAD)
       t = all_thread;
+    //printf("thread %x state = %d\n", t, t->state);
     if(t->state == RUNNABLE) {
       next_thread = t;
       break;
@@ -63,6 +83,8 @@ thread_schedule(void)
      * Invoke thread_switch to switch from t to next_thread:
      * thread_switch(??, ??);
      */
+    thread_switch(&t->context, &next_thread->context);
+    
   } else
     next_thread = 0;
 }
@@ -77,12 +99,15 @@ thread_create(void (*func)())
   }
   t->state = RUNNABLE;
   // YOUR CODE HERE
+  t->context.sp = (uint64)t->stack + STACK_SIZE; // 栈切换为线程自身的栈
+  t->context.ra = (uint64)func; // 设置初始ra，随后每次yield() ra都会指向yield()的下一条指令。
 }
 
 void 
 thread_yield(void)
 {
   current_thread->state = RUNNABLE;
+  //printf("yield: thread %x state %d\n", current_thread, current_thread->state);
   thread_schedule();
 }
 
@@ -95,8 +120,10 @@ thread_a(void)
   int i;
   printf("thread_a started\n");
   a_started = 1;
-  while(b_started == 0 || c_started == 0)
-    thread_yield();
+  while(b_started == 0 || c_started == 0) {
+  	thread_yield();
+  }
+    
   
   for (i = 0; i < 100; i++) {
     printf("thread_a %d\n", i);
