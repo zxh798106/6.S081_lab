@@ -17,6 +17,8 @@ struct entry *table[NBUCKET];
 int keys[NKEYS];
 int nthread = 1;
 
+pthread_mutex_t hash_lock;
+
 double
 now()
 {
@@ -46,6 +48,8 @@ void put(int key, int value)
     if (e->key == key)
       break;
   }
+
+  pthread_mutex_lock(&hash_lock); // 获取哈希锁
   if(e){
     // update the existing key.
     e->value = value;
@@ -53,6 +57,7 @@ void put(int key, int value)
     // the new is new.
     insert(key, value, &table[i], table[i]);
   }
+  pthread_mutex_unlock(&hash_lock); // 释放哈希锁
 }
 
 static struct entry*
@@ -74,6 +79,7 @@ put_thread(void *xa)
 {
   int n = (int) (long) xa; // thread number
   int b = NKEYS/nthread;
+  printf("n = %d, b = %d\n", n , b);
 
   for (int i = 0; i < b; i++) {
     put(keys[b*n + i], n);
@@ -114,6 +120,8 @@ main(int argc, char *argv[])
   for (int i = 0; i < NKEYS; i++) {
     keys[i] = random();
   }
+
+  pthread_mutex_init(&hash_lock, NULL); // 初始化哈希锁
 
   //
   // first the puts
