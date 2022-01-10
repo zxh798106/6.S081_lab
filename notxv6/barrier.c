@@ -23,14 +23,31 @@ barrier_init(void)
 }
 
 static void 
-barrier()
+barrier(long n)
 {
   // YOUR CODE HERE
   //
   // Block until all threads have called barrier() and
   // then increment bstate.round.
   //
-  
+  pthread_mutex_lock(&bstate.barrier_mutex); 
+  //printf("nd_num = %d, acquire lock, bstate.nd = %d\n", (int)n, bstate.nthread);
+  ++bstate.nthread;
+  // 非最后一个到此的线程，阻塞在此。
+  if (bstate.nthread != nthread) {
+    //printf("nd_num = %d, bstate.nd = %d, wait\n", (int)n,  bstate.nthread);
+    pthread_cond_wait(&bstate.barrier_cond, &bstate.barrier_mutex);
+    pthread_mutex_unlock(&bstate.barrier_mutex); // 被唤醒后会重新获取锁，所以这里要解锁。
+  }
+  // 最后一个进入该round barrier的线程，自增bstate.round，并唤醒其他线程。
+  else {
+    ++bstate.round;
+    bstate.nthread = 0;
+    pthread_mutex_unlock(&bstate.barrier_mutex); 
+    //printf("nd_num = %d, bstate.nd = %d, wake up\n", (int)n, bstate.nthread);
+    if (pthread_cond_broadcast(&bstate.barrier_cond) != 0) 
+      printf("broadcast error\n");
+  }
 }
 
 static void *
@@ -43,7 +60,7 @@ thread(void *xa)
   for (i = 0; i < 20000; i++) {
     int t = bstate.round;
     assert (i == t);
-    barrier();
+    barrier(n);
     usleep(random() % 100);
   }
 
@@ -65,6 +82,8 @@ main(int argc, char *argv[])
   nthread = atoi(argv[1]);
   tha = malloc(sizeof(pthread_t) * nthread);
   srandom(0);
+
+  //printf("nthread = %d\n", nthread);
 
   barrier_init();
 
