@@ -401,6 +401,30 @@ bmap(struct inode *ip, uint bn)
     return addr;
   }
 
+  // double indirect
+  bn -= NINDIRECT;
+  if (bn < DOUBLEINDIRECT) {
+    if((addr = ip->addrs[NDIRECT + 1]) == 0)
+      ip->addrs[NDIRECT + 1] = addr = balloc(ip->dev);
+    // 找一级索引
+    struct buf *idx_bp = bread(ip->dev, addr);
+    a = (uint*)idx_bp->data;
+    if ((addr = a[bn / 256]) == 0) {
+      a[bn / 256] = addr = balloc(ip->dev);
+      log_write(idx_bp);
+    }
+    // 找二级索引
+    bp = bread(ip->dev, addr);
+    uint *arr = (uint*)bp->data;
+    if ((addr = arr[bn % 256]) == 0) {
+      arr[bn % 256] = addr = balloc(ip->dev);
+      log_write(bp);
+    }
+    brelse(bp);
+    brelse(idx_bp);
+    return addr;
+  }
+
   panic("bmap: out of range");
 }
 
@@ -430,6 +454,28 @@ itrunc(struct inode *ip)
     brelse(bp);
     bfree(ip->dev, ip->addrs[NDIRECT]);
     ip->addrs[NDIRECT] = 0;
+  }
+
+  // 销毁double indirect
+  if (ip->addrs[NDIRECT + 1]) {
+    struct buf *idx_bp = bread(ip->dev, ip->addrs[NDIRECT + 1]);
+    a = (uint*)idx_bp->data;
+    for (i = 0; i < 256; ++i) {
+      if (a[i]) {
+        bp = bread(ip->dev, a[i]);
+        uint *arr = (uint*)bp->data;
+        for (j = 0; j < 256; ++j) {
+          if (arr[j]) {
+            bfree(ip->dev, arr[j]);
+          }
+        }
+        brelse(bp);
+        bfree(ip->dev, a[i]);
+      }
+    }
+    brelse(idx_bp);
+    bfree(ip->dev, ip->addrs[NDIRECT + 1]);
+    ip->addrs[NDIRECT + 1] = 0;
   }
 
   ip->size = 0;
