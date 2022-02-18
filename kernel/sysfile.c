@@ -294,18 +294,19 @@ sys_open(void)
 
   if((n = argstr(0, path, MAXPATH)) < 0 || argint(1, &omode) < 0)
     return -1;
-
+  //printf("%s\n", path);
   begin_op();
-
   if(omode & O_CREATE){
     ip = create(path, T_FILE, 0, 0);
     if(ip == 0){
       end_op();
+      //printf("ip create is 0\n");
       return -1;
     }
   } else {
     if((ip = namei(path)) == 0){
       end_op();
+      //printf("ip namei is 0\n");
       return -1;
     }
     ilock(ip);
@@ -315,6 +316,7 @@ sys_open(void)
       return -1;
     }
   }
+  
 
   if(ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV)){
     iunlockput(ip);
@@ -334,6 +336,32 @@ sys_open(void)
     f->type = FD_DEVICE;
     f->major = ip->major;
   } else {
+    // ------符号链接类型------//
+    // 有O_NOFOLLOW标志，无需添加任何操作,直接返回ip。该if代码内容仅为调试用。
+    if (ip->type == T_SYMLINK && omode & O_NOFOLLOW) {
+      readi(ip, 0, (uint64)path, 0, MAXPATH);
+      //printf("O_NOFOLLOW: %s\n", path);
+    }
+    // 对ip递归寻找下一层符号链接
+    int recur_times = 0;
+    while (ip->type == T_SYMLINK && !(omode & O_NOFOLLOW)) {
+      readi(ip, 0, (uint64)path, 0, MAXPATH);
+      iunlockput(ip); // 进入下一层，释放上一层的ip锁
+      //printf("recur: %s, recur_times = %d\n", path, recur_times);
+      if (++recur_times >= 10) {
+        end_op();
+        //printf("recur times is deeper than 10\n");
+        return -1;
+      }
+      // 根据路径path找到其inode ip的地址
+      if ((ip = namei(path)) == 0) {
+        end_op();
+        //printf("symlink namei wrong\n");
+        return -1;
+      }
+      ilock(ip); // 加锁下一层的ip
+    }
+
     f->type = FD_INODE;
     f->off = 0;
   }
@@ -482,5 +510,31 @@ sys_pipe(void)
     fileclose(wf);
     return -1;
   }
+  return 0;
+}
+
+uint64 sys_symlink(void) {
+  char target[MAXPATH], path[MAXPATH];
+  struct inode *ip;
+
+  if(argstr(0, target, MAXPATH) < 0 || argstr(1, path, MAXPATH) < 0)
+    return -1;
+  
+  begin_op();
+  // 创建inode
+  if((ip = create(path, T_SYMLINK, 0, 0)) == 0) {
+    end_op();
+    return -1;
+  }
+  // 向ip的data blocks中写入链接target
+  if (writei(ip, 0, (uint64)target, 0, MAXPATH) < 0) {
+    panic("symlink writei wrong");
+  }
+  
+  iunlockput(ip);
+  end_op();
+
+  //printf("symlink create path: %s\n", path);
+
   return 0;
 }
