@@ -5,6 +5,11 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "sleeplock.h"
+#include "fs.h"
+#include "file.h"
+#include "fcntl.h"
+
 
 struct spinlock tickslock;
 uint ticks;
@@ -67,7 +72,54 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  } 
+  else if (r_scause() == 15 || r_scause() == 13) {
+    uint64 va = r_stval();
+    if (va >= p->sz && va < MMAP_START) {
+      p->killed = 1;
+    }
+    else if (va < p->sz) {
+      p->killed = 1;
+    }
+    else if (va >= MMAP_START) {
+      uint64 ka = (uint64) kalloc();
+      memset((void*)ka, 0, PGSIZE);
+      if (ka == 0) {
+        p->killed = 1;
+        printf("no more ka\n");
+      }
+      else {
+        // 分配物理地址，并复制权限
+        int idx = (va - MMAP_START) / MMAP_ITV;
+        //printf("va = %p, va_down = %p, idx = %d\n", va, PGROUNDDOWN(va), idx);
+        va = PGROUNDDOWN(va);
+        
+        //printf("read\n");
+        ilock(p->vma[idx].f->ip);
+        readi(p->vma[idx].f->ip, 0, ka, va - (MMAP_START + idx * MMAP_ITV), PGSIZE); // 文件内容读取至内存
+        iunlock(p->vma[idx].f->ip);
+        //printf("read finish, vma[%d].prot = %d\n", idx, p->vma[idx].prot);
+
+        int prot = PTE_U;
+        if (p->vma[idx].prot & PROT_READ)
+          prot |= PTE_R;
+        if (p->vma[idx].prot & PROT_WRITE)
+          prot |= PTE_W;
+        if (p->vma[idx].prot & PROT_EXEC)
+          prot |= PTE_X;
+
+        // 建立映射
+        if (mappages(p->pagetable, va, PGSIZE, ka, prot) != 0) {
+          printf("usertrap: map wrong\n");
+          kfree((void*)ka);
+          p->killed = 1;
+        }
+      }
+    }
+    else 
+      panic("va less unmap");
+  }
+  else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;

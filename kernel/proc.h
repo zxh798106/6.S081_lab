@@ -82,6 +82,15 @@ struct trapframe {
 
 enum procstate { UNUSED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
+struct vma {
+  uint64 addr;         // 起始地址
+  uint32 length;      // 长度
+  int prot;           // 读, 写, 执行
+  int flags;          // MAP_SHARED, MAP_PRIVATE
+  struct file *f;     // 文件
+  int used;           // 当前是否使用
+};
+
 // Per-process state
 struct proc {
   struct spinlock lock;
@@ -93,6 +102,8 @@ struct proc {
   int killed;                  // If non-zero, have been killed
   int xstate;                  // Exit status to be returned to parent's wait
   int pid;                     // Process ID
+
+  struct vma vma[NOFILE];          // 记录mmap的情况
 
   // these are private to the process, so p->lock need not be held.
   uint64 kstack;               // Virtual address of kernel stack

@@ -15,6 +15,7 @@
 #include "sleeplock.h"
 #include "file.h"
 #include "fcntl.h"
+#include "memlayout.h"
 
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
@@ -482,5 +483,121 @@ sys_pipe(void)
     fileclose(wf);
     return -1;
   }
+  return 0;
+}
+
+uint64 sys_mmap(void) {
+  uint64 addr;
+  int length, prot, flags, fd, offset;
+
+  argaddr(0, &addr);
+  argint(1, &length);
+  argint(2, &prot);
+  argint(3, &flags);
+  argint(4, &fd);
+  argint(5, &offset);
+
+  struct proc *p = myproc();
+
+  if (!p->ofile[fd]->readable) {
+    if (prot & PROT_READ) {
+      //printf("prot read wrong\n");
+      return 0xffffffffffffffff; 
+    }
+  }
+  if (!p->ofile[fd]->writable) {
+    if (prot & PROT_WRITE && flags == MAP_SHARED) {
+      //printf("prot write wrong\n");
+      return 0xffffffffffffffff; 
+    }
+  }
+
+  // 映射时应该加锁
+  acquire(&p->lock);
+  for (int i = 0; i < NOFILE; ++i) {
+    if (p->vma[i].used == 0) {
+      p->vma[i].addr = MMAP_START + i * MMAP_ITV;
+      p->vma[i].length = length;
+      p->vma[i].prot = prot;
+      p->vma[i].flags = flags;
+      p->vma[i].f = filedup(p->ofile[fd]); // 增加文件引用计数
+      p->vma[i].used = 1;
+      
+      // 映射该虚拟地址，但是不分配物理空间（好像不对）
+      release(&p->lock);
+      //printf("mmap: vma[%d].addr = %p\n", i, p->vma[i].addr);
+      //printf("vma[%d].prot = %d\n", i, p->vma[i].prot);
+      return p->vma[i].addr;
+    }
+  }
+  release(&p->lock);
+  panic("no free vma");
+
+  return 0xffffffffffffffff;
+}
+
+uint64 sys_munmap(void) {
+  uint64 addr;
+  int length;
+
+  argaddr(0, &addr);
+  argint(1, &length);
+
+  struct proc *p = myproc();
+
+  
+
+  int idx = (addr - MMAP_START) / MMAP_ITV;
+  if (p->vma[idx].used == 0) {
+    printf("addr not used\n");
+    return -1;
+  }
+
+  //printf("munmap: addr = %p, \n", addr, p->vma[i].addr);
+
+  // 写回文件
+  if (p->vma[idx].flags == MAP_SHARED) {
+    filewrite(p->vma[idx].f, addr, length);
+  }
+  
+  // 整块释放
+  if (addr == MMAP_START + idx * MMAP_ITV && length == p->vma[idx].length) {
+    // 释放vma资源
+    fileclose(p->vma[idx].f); // 减少文件引用计数
+    acquire(&p->lock);
+    p->vma[idx].addr = 0;
+    p->vma[idx].length = 0;
+    p->vma[idx].prot = 0;
+    p->vma[idx].flags = 0;
+    p->vma[idx].f = 0;
+    p->vma[idx].used = 0;
+    release(&p->lock);
+    // 解除va-pa映射
+    uint64 va = PGROUNDDOWN(addr);
+    uvmunmap(p->pagetable, va, PGROUNDDOWN(length + addr - va)/PGSIZE, 1);
+  }
+  // 前块释放
+  else if (addr == MMAP_START + idx * MMAP_ITV && length < p->vma[idx].length) {
+    acquire(&p->lock);
+    p->vma[idx].addr = addr + PGROUNDDOWN(length);
+    p->vma[idx].length -= PGROUNDDOWN(length);
+    release(&p->lock);
+    // 解除va-pa映射
+    uint64 va = PGROUNDDOWN(addr);
+    uvmunmap(p->pagetable, va, PGROUNDDOWN(length + addr - va)/PGSIZE, 1);
+  }
+  // 后块释放
+  else if (addr != MMAP_START + idx * MMAP_ITV) {
+    acquire(&p->lock);
+    p->vma[idx].length -= PGROUNDDOWN(length);
+    release(&p->lock);
+    // 解除va-pa映射
+    uint64 va = PGROUNDUP(addr);
+    uvmunmap(p->pagetable, va, PGROUNDDOWN(length)/PGSIZE, 1);
+  }
+  else {
+    panic("other cases\n");
+  }
+
   return 0;
 }

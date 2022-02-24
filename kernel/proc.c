@@ -134,6 +134,10 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  for (int i = 0; i < NOFILE; ++i) {
+    p->vma[i].used = 0;
+  }
+
   return p;
 }
 
@@ -282,6 +286,20 @@ fork(void)
   }
   np->sz = p->sz;
 
+  // 复制mmap区域
+  for (i = 0; i < NOFILE; ++i) {
+    if (p->vma[i].used == 1) {
+      uvmcopy_mmap(p->pagetable, np->pagetable, p->vma[i].addr, p->vma[i].length);
+      // 锁在函数上方获取过了，无需重新获取
+      np->vma[i].addr = p->vma[i].addr;
+      np->vma[i].length = p->vma[i].length;
+      np->vma[i].prot = p->vma[i].prot;
+      np->vma[i].flags = p->vma[i].flags;
+      np->vma[i].f = filedup(p->vma[i].f);
+      np->vma[i].used = 1;
+    }
+  }
+
   np->parent = p;
 
   // copy saved user registers.
@@ -343,6 +361,28 @@ exit(int status)
 
   if(p == initproc)
     panic("init exiting");
+  
+  // 释放vma资源
+  
+  for (int i = 0; i < NOFILE; ++i) {
+    if (p->vma[i].used == 1) {
+      // 解除va-pa映射
+      uint64 va = PGROUNDDOWN(p->vma[i].addr);
+      uvmunmap(p->pagetable, va, PGROUNDUP(p->vma[i].length)/PGSIZE,1);
+      // 释放vma资源
+      // acquire(&p->lock); // 加在这里报错panic acquire，因为fileclose sleep那获取了p->lock
+      fileclose(p->vma[i].f);
+      acquire(&p->lock);
+      p->vma[i].addr = 0;
+      p->vma[i].length = 0;
+      p->vma[i].prot = 0;
+      p->vma[i].flags = 0;
+      p->vma[i].f = 0;
+      p->vma[i].used = 0;
+      release(&p->lock);
+    }
+  }
+  
 
   // Close all open files.
   for(int fd = 0; fd < NOFILE; fd++){

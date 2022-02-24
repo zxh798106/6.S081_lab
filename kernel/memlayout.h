@@ -65,3 +65,7 @@
 //   TRAPFRAME (p->trapframe, used by the trampoline)
 //   TRAMPOLINE (the same page as in the kernel)
 #define TRAPFRAME (TRAMPOLINE - PGSIZE)
+
+
+#define MMAP_START  (PHYSTOP + 0x1000000) // mmap的起始地址
+#define MMAP_ITV    0x1000000             // mmap的间隔
