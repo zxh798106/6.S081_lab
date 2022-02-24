@@ -75,9 +75,11 @@ usertrap(void)
   } 
   else if (r_scause() == 15 || r_scause() == 13) {
     uint64 va = r_stval();
+    // 大于进程sz的va，直接kill
     if (va >= p->sz && va < MMAP_START) {
       p->killed = 1;
     }
+    // 小于进程sz的va，直接kill （没有实现进程sz空间的lazy alloction，不会出现这种情况）
     else if (va < p->sz) {
       p->killed = 1;
     }
@@ -99,7 +101,7 @@ usertrap(void)
         readi(p->vma[idx].f->ip, 0, ka, va - (MMAP_START + idx * MMAP_ITV), PGSIZE); // 文件内容读取至内存
         iunlock(p->vma[idx].f->ip);
         //printf("read finish, vma[%d].prot = %d\n", idx, p->vma[idx].prot);
-
+        // 设置页的权限
         int prot = PTE_U;
         if (p->vma[idx].prot & PROT_READ)
           prot |= PTE_R;

@@ -363,7 +363,6 @@ exit(int status)
     panic("init exiting");
   
   // 释放vma资源
-  
   for (int i = 0; i < NOFILE; ++i) {
     if (p->vma[i].used == 1) {
       // 解除va-pa映射
@@ -372,14 +371,14 @@ exit(int status)
       // 释放vma资源
       // acquire(&p->lock); // 加在这里报错panic acquire，因为fileclose sleep那获取了p->lock
       fileclose(p->vma[i].f);
-      acquire(&p->lock);
+      //acquire(&p->lock);
       p->vma[i].addr = 0;
       p->vma[i].length = 0;
       p->vma[i].prot = 0;
       p->vma[i].flags = 0;
       p->vma[i].f = 0;
       p->vma[i].used = 0;
-      release(&p->lock);
+      //release(&p->lock);
     }
   }
   

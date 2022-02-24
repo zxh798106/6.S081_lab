@@ -513,7 +513,7 @@ uint64 sys_mmap(void) {
   }
 
   // 映射时应该加锁
-  acquire(&p->lock);
+  //acquire(&p->lock);
   for (int i = 0; i < NOFILE; ++i) {
     if (p->vma[i].used == 0) {
       p->vma[i].addr = MMAP_START + i * MMAP_ITV;
@@ -522,15 +522,15 @@ uint64 sys_mmap(void) {
       p->vma[i].flags = flags;
       p->vma[i].f = filedup(p->ofile[fd]); // 增加文件引用计数
       p->vma[i].used = 1;
-      
+    
       // 映射该虚拟地址，但是不分配物理空间（好像不对）
-      release(&p->lock);
+      //release(&p->lock);
       //printf("mmap: vma[%d].addr = %p\n", i, p->vma[i].addr);
       //printf("vma[%d].prot = %d\n", i, p->vma[i].prot);
       return p->vma[i].addr;
     }
   }
-  release(&p->lock);
+  //release(&p->lock);
   panic("no free vma");
 
   return 0xffffffffffffffff;
@@ -544,8 +544,6 @@ uint64 sys_munmap(void) {
   argint(1, &length);
 
   struct proc *p = myproc();
-
-  
 
   int idx = (addr - MMAP_START) / MMAP_ITV;
   if (p->vma[idx].used == 0) {
@@ -564,33 +562,33 @@ uint64 sys_munmap(void) {
   if (addr == MMAP_START + idx * MMAP_ITV && length == p->vma[idx].length) {
     // 释放vma资源
     fileclose(p->vma[idx].f); // 减少文件引用计数
-    acquire(&p->lock);
+    //acquire(&p->lock);
     p->vma[idx].addr = 0;
     p->vma[idx].length = 0;
     p->vma[idx].prot = 0;
     p->vma[idx].flags = 0;
     p->vma[idx].f = 0;
     p->vma[idx].used = 0;
-    release(&p->lock);
+    //release(&p->lock);
     // 解除va-pa映射
     uint64 va = PGROUNDDOWN(addr);
     uvmunmap(p->pagetable, va, PGROUNDDOWN(length + addr - va)/PGSIZE, 1);
   }
   // 前块释放
   else if (addr == MMAP_START + idx * MMAP_ITV && length < p->vma[idx].length) {
-    acquire(&p->lock);
+    //acquire(&p->lock);
     p->vma[idx].addr = addr + PGROUNDDOWN(length);
     p->vma[idx].length -= PGROUNDDOWN(length);
-    release(&p->lock);
+    //release(&p->lock);
     // 解除va-pa映射
     uint64 va = PGROUNDDOWN(addr);
     uvmunmap(p->pagetable, va, PGROUNDDOWN(length + addr - va)/PGSIZE, 1);
   }
   // 后块释放
   else if (addr != MMAP_START + idx * MMAP_ITV) {
-    acquire(&p->lock);
+    //acquire(&p->lock);
     p->vma[idx].length -= PGROUNDDOWN(length);
-    release(&p->lock);
+    //release(&p->lock);
     // 解除va-pa映射
     uint64 va = PGROUNDUP(addr);
     uvmunmap(p->pagetable, va, PGROUNDDOWN(length)/PGSIZE, 1);
