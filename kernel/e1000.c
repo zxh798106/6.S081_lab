@@ -42,7 +42,7 @@ e1000_init(uint32 *xregs)
   // [E1000 14.5] Transmit initialization
   memset(tx_ring, 0, sizeof(tx_ring));
   for (i = 0; i < TX_RING_SIZE; i++) {
-    tx_ring[i].status = E1000_TXD_STAT_DD;
+    tx_ring[i].status = E1000_TXD_STAT_DD; 
     tx_mbufs[i] = 0;
   }
   regs[E1000_TDBAL] = (uint64) tx_ring;
@@ -102,7 +102,32 @@ e1000_transmit(struct mbuf *m)
   // the TX descriptor ring so that the e1000 sends it. Stash
   // a pointer so that it can be freed after sending.
   //
-  
+  acquire(&e1000_lock);
+  // if(regs[E1000_TDT] != regs[E1000_TDH]) {
+    int idx = regs[E1000_TDT] % TX_RING_SIZE;
+    if ((tx_ring[idx].status & 1) != E1000_TXD_STAT_DD) {
+      printf("tx status is not DD\n");
+      release(&e1000_lock);
+      return -1;
+    }
+    if (tx_mbufs[idx]) 
+      mbuffree(tx_mbufs[idx]);
+    tx_mbufs[idx] = m;
+    tx_ring[idx].addr = (uint64)m->head;
+    tx_ring[idx].length = m->len; 
+    tx_ring[idx].cmd = 9;
+
+    regs[E1000_TDT] = (idx + 1) % TX_RING_SIZE;
+
+    //printf("tx tail = %d, head = %d\n", regs[E1000_TDT], regs[E1000_TDH]);
+  // }
+  // else {
+  //   printf("no more tx queue\n");
+  //   release(&e1000_lock);
+  //   return -1;
+  // }
+
+  release(&e1000_lock);
   return 0;
 }
 
@@ -115,6 +140,39 @@ e1000_recv(void)
   // Check for packets that have arrived from the e1000
   // Create and deliver an mbuf for each packet (using net_rx()).
   //
+  
+  // recv无需加锁，因为是从中断过来的，同等级的中断不会嵌套。
+  int idx = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
+  while((rx_ring[idx].status & 1) == E1000_RXD_STAT_DD) {
+    rx_mbufs[idx]->len = rx_ring[idx].length;
+    net_rx(rx_mbufs[idx]);
+    rx_mbufs[idx] = mbufalloc(0);
+    rx_ring[idx].addr = (uint64)rx_mbufs[idx]->head;
+    rx_ring[idx].status = 0;
+    idx = (idx + 1) % RX_RING_SIZE;
+  }
+  regs[E1000_RDT] = idx - 1;
+  //printf("rx tail = %d, head = %d\n", regs[E1000_RDT], regs[E1000_RDH]);
+  /*acquire(&e1000_lock);
+  while (regs[E1000_RDT] != regs[E1000_RDH]) {
+    int idx = regs[E1000_RDT];
+    if ((rx_ring[idx].status & 1) != E1000_RXD_STAT_DD) {
+      printf("rx status is not DD\n");
+      release(&e1000_lock);
+      return;
+    }
+    rx_mbufs[idx]->len = rx_ring[idx].length;
+    net_rx(rx_mbufs[idx]);
+    rx_mbufs[idx] = mbufalloc(0);
+    if (!rx_mbufs[idx])
+      panic("e1000");
+    rx_ring[idx].addr = (uint64) rx_mbufs[idx]->head;
+    rx_ring[idx].status = 0;
+
+    ++regs[E1000_RDT];
+    regs[E1000_RDT] %= RX_RING_SIZE;
+  }
+  release(&e1000_lock);*/
 }
 
 void
